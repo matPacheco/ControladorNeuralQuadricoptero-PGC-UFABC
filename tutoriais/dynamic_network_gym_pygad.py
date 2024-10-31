@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 import pygad
 import tensorflow as tf
-from tensorflow.keras import Sequential
+from tensorflow.keras import Sequential, Input
 from tensorflow.keras.layers import Dense
 
 env = gym.make("CartPole-v1", render_mode=None)
@@ -15,7 +15,12 @@ max_neurons = 20  # Número máximo de neurônios em uma camada oculta
 
 # Função para construir uma rede com um número variável de neurônios na camada oculta
 def build_model(num_neurons):
+    if num_neurons < min_neurons:
+        num_neurons = min_neurons
+    if num_neurons > max_neurons:
+        num_neurons = max_neurons
     model = Sequential()
+    model.add(Input(shape=(observation_space,)))  # Definir a entrada do modelo
     model.add(Dense(num_neurons, input_dim=observation_space, activation='relu'))
     model.add(Dense(action_space, activation='softmax'))  # Ações
     return model
@@ -40,7 +45,9 @@ def vector_to_model_weights(model, weight_vector):
 def fitness_function(ga_instance, solution, _):
     num_neurons = int(solution[0])  # O primeiro gene representa o número de neurônios
     weight_vector = solution[1:]  # Os demais genes representam os pesos
+    print(solution)
     model = build_model(num_neurons)
+    print("-"*64)
     vector_to_model_weights(model, weight_vector)
     
     total_reward = 0
@@ -71,7 +78,6 @@ def mutation_function(offspring, ga_instance):
         offspring[i, 1:] += np.random.normal(0, 0.1, offspring[i, 1:].shape)
     return offspring
 
-
 # Callback para cada geração
 def on_generation(ga_instance):
     best_solution_fitness = ga_instance.best_solution()[1]
@@ -84,6 +90,7 @@ num_genes = calculate_num_genes(num_neurons_initial)
 ga_instance = pygad.GA(num_generations=50,
                        num_parents_mating=20,
                        fitness_func=fitness_function,
+                    #    init_range_low=5,
                        sol_per_pop=50,
                        num_genes=num_genes,
                        mutation_percent_genes=5,
