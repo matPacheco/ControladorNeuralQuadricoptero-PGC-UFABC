@@ -6,21 +6,14 @@ from tensorflow.keras import Sequential, Input
 from tensorflow.keras.layers import Dense
 import time  # Para adicionar atraso
 
-# Criação do ambiente CartPole-v1
-env = gym.make("CartPole-v1", render_mode=None)
-observation_space = env.observation_space.shape[0]
-action_space = env.action_space.n
 
 # Definir a rede neural em Keras
-def build_model():
+def build_model(obs_space, act_space):
     model = Sequential()
-    model.add(Input(shape=(observation_space,)))  # Definir a entrada do modelo
+    model.add(Input(shape=(obs_space,)))  # Definir a entrada do modelo
     model.add(Dense(10, activation='relu'))
-    model.add(Dense(action_space, activation='softmax'))  # Probabilidade para cada ação
+    model.add(Dense(act_space, activation='softmax'))  # Probabilidade para cada ação
     return model
-
-model = build_model()
-model.summary()
 
 # Converter a rede neural para um vetor de pesos
 def model_weights_to_vector(model):
@@ -60,7 +53,16 @@ def on_generation(ga_instance):
     best_solution_fitness = ga_instance.best_solution()[1]
     print(f"Geração {ga_instance.generations_completed} | Melhor recompensa: {best_solution_fitness}")
     print(ga_instance.best_solution())
-    
+
+# Criação do ambiente CartPole-v1
+env = gym.make("CartPole-v1", render_mode=None)
+observation_space = env.observation_space.shape[0]
+action_space = env.action_space.n
+
+# Criação do modelo inicial
+model = build_model(observation_space, action_space)
+model.summary()
+
 # Parâmetros do Algoritmo Genético
 sol_per_pop = 50  # Tamanho da população
 num_generations = 50
