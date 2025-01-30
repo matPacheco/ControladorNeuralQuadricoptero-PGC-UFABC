@@ -1,3 +1,5 @@
+import multiprocessing
+
 import gymnasium as gym
 import numpy as np
 import pygad
@@ -5,7 +7,9 @@ import tensorflow as tf
 from tensorflow.keras import Sequential, Input
 from tensorflow.keras.layers import Dense
 
-env = gym.make("CartPole-v1", render_mode=None)
+# DEAP testar
+
+env = gym.make("LunarLander-v2", render_mode=None)
 observation_space = env.observation_space.shape[0]
 action_space = env.action_space.n
 
@@ -43,13 +47,14 @@ def vector_to_model_weights(model, weight_vector):
 
 # Função de fitness que também considera a estrutura da rede
 def fitness_function(ga_instance, solution, _):
+    print("lalala")
+    print(len(solution))
     num_neurons = int(solution[0])  # O primeiro gene representa o número de neurônios
     weight_vector = solution[1:]  # Os demais genes representam os pesos
-    print(solution)
     model = build_model(num_neurons)
-    print("-"*64)
+    # print(solution)
     vector_to_model_weights(model, weight_vector)
-    
+    # print("working...")
     total_reward = 0
     obs, _ = env.reset()
     done = False
@@ -61,7 +66,14 @@ def fitness_function(ga_instance, solution, _):
         total_reward += reward
         if done or truncated:
             break
+    print(total_reward)
+    # print("-"*64)
     return total_reward
+
+def parallel_fitness(population, _):
+    with multiprocessing.Pool(processes=8) as pool:
+        fitness_values = pool.map(fitness_function, population)
+    return fitness_values
 
 # Definir o tamanho dinâmico da rede e número de genes (inclui neurônios e pesos)
 def calculate_num_genes(num_neurons):
@@ -90,12 +102,14 @@ num_genes = calculate_num_genes(num_neurons_initial)
 ga_instance = pygad.GA(num_generations=50,
                        num_parents_mating=20,
                        fitness_func=fitness_function,
-                    #    init_range_low=5,
                        sol_per_pop=50,
                        num_genes=num_genes,
                        mutation_percent_genes=5,
                        mutation_type=mutation_function,
-                       on_generation=on_generation)
+                       on_generation=on_generation,
+                       parallel_processing=['thread', 4])
+
+print("COMEÇANDO ALGORITMO GENÉTICO")
 
 ga_instance.run()
 
