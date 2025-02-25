@@ -15,7 +15,7 @@ fsspec==2024.12.0
 gast==0.6.0
 google-pasta==0.2.0
 grpcio==1.70.0
--e git+https://github.com/ivanzufabc/gym-pybullet-drones.git@e705f6cc05e5930254c72963ae8dbc359a90b8ff#egg=gym_pybullet_drones
+-e git+https://github.com/ivanzufabc/gym-pybullet-drones.git@75cae42877117caec8287b2135a2670d3f600fba#egg=gym_pybullet_drones
 gymnasium==0.28.1
 h5py==3.12.1
 idna==3.10
