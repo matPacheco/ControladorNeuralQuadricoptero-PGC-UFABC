@@ -2,6 +2,7 @@ import gym_pybullet_drones
 
 import gymnasium as gym
 import numpy as np
+import pandas as pd
 from deap import base, creator, tools, algorithms
 
 import tensorflow as tf
@@ -10,11 +11,18 @@ from keras import layers
 from keras import backend as K
 
 import os
+import random
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
-
-
+NUM_PROCESSES = multiprocessing.cpu_count()
+NUM_PROCESSES = 6
+print("Número de processos:", NUM_PROCESSES)
 # Ambiente do Gym
-env = gym.make("GPS-Distance-v0")
+rng = random.Random(42)
+env = gym.make("GPS-Distance-v0", rng=rng)
 observation_space = 14
 action_space = env.action_space.shape[1]
 print("Action Space:", action_space)
@@ -25,6 +33,13 @@ max_neurons = 20  # Número máximo de neurônios em uma camada oculta
 
 min_layers = 1
 max_layers = 10
+
+# Função para inicializar cada processo worker
+def init_worker():
+    global model_cache
+    model_cache = {}
+    # Limpa qualquer estado residual do TF
+    tf.keras.backend.clear_session()
 
 # Função para obter a quantidade de parâmetros em determinado modelo
 def get_num_weights(individual):
@@ -51,44 +66,32 @@ def get_max_weights_per_layer():
 
 # Função para construir uma rede com um número variável de neurônios na camada oculta
 def build_model(individual):
-    model = keras.models.Sequential()
-    model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
-
-    # Camadas Ocultas
     num_layers = individual[0]
-    i = 1
-    for _ in range(num_layers):
-        # Garantir que está dentro do intervalo desejado
-        num_neurons = int(np.clip(individual[i], min_neurons, max_neurons))
-        model.add(layers.Dense(num_neurons, activation='relu'))
-        i += 1
-    model.add(layers.Dense(action_space, activation='tanh'))  # Ações
-    return model
+    key = tuple(individual[:11])  # Topologia como chave do cache
+
+    if key not in model_cache:
+        model = keras.models.Sequential()
+        model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
+
+        # Camadas Ocultas
+        num_layers = individual[0]
+        i = 1
+        for _ in range(num_layers):
+            # Garantir que está dentro do intervalo desejado
+            num_neurons = int(np.clip(individual[i], min_neurons, max_neurons))
+            model.add(layers.Dense(num_neurons, activation='relu'))
+            i += 1
+        model.add(layers.Dense(action_space, activation='tanh'))  # Ações
+        model_cache[key] = model
+
+    return keras.models.clone_model(model_cache[key])
+
 
 # Função para obter os pesos e topologia (número de neurônios) da rede
 def model_weights_to_vector(model):
     weights = model.get_weights()
     weight_vector = np.concatenate([w.flatten() for w in weights])
     return weight_vector
-
-# def vector_to_model_weights(model, weight_vector):
-#     max_neurons_per_layer = get_max_weights_per_layer()
-
-#     idx_layer = 0
-#     new_weights = []
-#     for layer in model.layers:
-#         shapes = [w.shape for w in layer.get_weights()]
-#         new_weights_layer = weight_vector[idx_layer:idx_layer + max_neurons_per_layer]
-
-#         idx = 0
-#         for shape in shapes:
-#             size = np.prod(shape)
-#             new_weights.append(new_weights_layer[idx:idx + size].reshape(shape))
-#             idx += size
-
-#         idx_layer += max_neurons_per_layer
-
-#     model.set_weights(new_weights)
 
 def vector_to_model_weights(model, weight_vector):
     new_weights = []
@@ -105,17 +108,10 @@ def vector_to_model_weights(model, weight_vector):
 
 # Função de fitness que também considera a estrutura da rede
 def evaluate(individual):
-    # print("-"*64)
-    # print("evaluate")
-    K.clear_session()  # Limpar a sessão do Keras para evitar problemas de memória
-    tf.compat.v1.reset_default_graph()
-    
     num_layers = int(individual[0])  # O primeiro gene representa o número de camadas
     weight_vector = np.array(individual[11:])
     model = build_model(individual)
-    # print("criou o modelo")
     vector_to_model_weights(model, weight_vector)
-    # print("setou os vetores")
 
     total_reward = 0
     obs, _ = env.reset()
@@ -125,27 +121,13 @@ def evaluate(individual):
             obs[0].flatten(), 
             obs[1].flatten(), 
             obs[2].flatten()), axis=0)
-        # print(obs.shape)
         obs = obs.reshape(1, -1)  # Garante (1, 14)
-        # print("obs:")
-        # print(obs[0])
-        # print(obs)
-        # print(obs.shape)
         action = model.predict(obs, verbose=0)
-        # print("action_prob:")
-        # print(action_prob)
-        # # action = np.argmax(action_prob)
-        # # action = action_prob[0] 
-        # print(action_prob.shape)
-        # print(action.shape)
         obs, reward, done, truncated, _ = env.step(action)
         total_reward += reward
         if done or truncated:
             break
-    # print("Última:", reward)
-    # print("Total:", total_reward)
-    # print(action)
-    
+
     return reward,
 
 # Definir como inicializar indivíduos
@@ -209,10 +191,29 @@ mstats.register("std", lambda values: np.round(np.std(values), 1))
 mstats.register("min", lambda values: np.round(np.min(values), 1))
 mstats.register("max", lambda values: np.round(np.max(values), 1))
 
+logbook = tools.Logbook()
+logbook.header = ["gen", "fitness", "layers"]  # Cabeçalho para MultiStatistics
+logbook.chapters["fitness"].header = ["média", "melhor", "pior"]
+logbook.chapters["layers"].header = ["média_camadas"]
+
+pool = ProcessPoolExecutor(max_workers=NUM_PROCESSES, initializer=init_worker)
+toolbox.register("map", pool.map)
+
 # CXPB = crossing probability
 # MUTPB = mutating probability
-algorithms.eaSimple(population, toolbox, cxpb=0.7, mutpb=0.2, ngen=num_generations,
-                    stats=mstats, halloffame=hall_of_fame, verbose=True)
+final_pop, logbook = algorithms.eaSimple(
+    population, 
+    toolbox, 
+    cxpb=0.7, 
+    mutpb=0.2, 
+    ngen=num_generations,
+    stats=mstats, 
+    halloffame=hall_of_fame, 
+    verbose=True
+)
+
+df = pd.DataFrame(logbook)
+df.to_csv("logbook.csv")
 
 # Melhor solução encontrada
 best_individual = hall_of_fame[0]

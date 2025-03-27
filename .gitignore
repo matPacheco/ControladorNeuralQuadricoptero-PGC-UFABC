@@ -1,4 +1,6 @@
 gym-pybullet-drones/
+cuda-keyring_1.1-1_all.deb
+*.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
