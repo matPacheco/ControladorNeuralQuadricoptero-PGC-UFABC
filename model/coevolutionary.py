@@ -189,7 +189,7 @@ toolbox_weights.register("mate", tools.cxUniform, indpb=0.7)
 toolbox_weights.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.2)
 # toolbox_weights.register("select", tools.selTournament, tournsize=3)
 toolbox_weights.register("select", tools.selBest)
-toolbox_topology.register("map", pool.map)
+toolbox_weights.register("map", pool.map)
 
 # # Estatísticas
 # stats_fit = tools.Statistics(key=lambda ind: ind.fitness.values[0])
