@@ -14,12 +14,13 @@ import os
 import random
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
 NUM_PROCESSES = multiprocessing.cpu_count()
-NUM_PROCESSES = 6
+NUM_PROCESSES = 4
 print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
@@ -48,9 +49,31 @@ pool = ProcessPoolExecutor(
 
 # Função para construir uma rede com um número variável de neurônios na camada oculta
 def build_model(topology):
+    try:
+        if len(model_cache) > 10:
+            model_cache.popitem()  # Remove o modelo mais antigo
+    except NameError:
+        pass 
     key = tuple(topology)  # Topologia como chave do cache
 
-    if key not in model_cache:
+    try:
+        if key not in model_cache:
+            model = keras.models.Sequential()
+            model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
+
+            # Camadas Ocultas
+            num_layers = topology[0]
+            i = 1
+            for _ in range(num_layers):
+                # Garantir que está dentro do intervalo desejado
+                num_neurons = int(np.clip(topology[i], min_neurons, max_neurons))
+                model.add(layers.Dense(num_neurons, activation='relu'))
+                i += 1
+            model.add(layers.Dense(action_space, activation='tanh'))  # Ações
+            model_cache[key] = model
+
+        return keras.models.clone_model(model_cache[key])
+    except NameError:
         model = keras.models.Sequential()
         model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
 
@@ -63,9 +86,9 @@ def build_model(topology):
             model.add(layers.Dense(num_neurons, activation='relu'))
             i += 1
         model.add(layers.Dense(action_space, activation='tanh'))  # Ações
-        model_cache[key] = model
+        return model
 
-    return keras.models.clone_model(model_cache[key])
+
 
 # Função para obter os pesos e topologia (número de neurônios) da rede
 def model_weights_to_vector(model):
@@ -85,7 +108,7 @@ def vector_to_model_weights(model, weight_vector):
             idx += size
     model.set_weights(new_weights)
 
-def mutate_topology(individual, mutation_rate=0.1):
+def mutate_topology(individual, mutation_rate=0.3):
     if np.random.rand() < mutation_rate:  # 10% de chance de mutação na quantidade de camadas
         choice = int(np.random.choice([-1, 1]))
         individual[0] = int(np.clip(individual[0] + choice, min_layers, max_layers))
@@ -99,7 +122,7 @@ def mutate_topology(individual, mutation_rate=0.1):
 
     return individual,
 
-def evaluate(topology, weights):
+def evaluate(topology, weights, print_info=False):
     model = build_model(topology)
     weights_vector = np.array(weights)
     vector_to_model_weights(model, weights_vector)
@@ -114,10 +137,13 @@ def evaluate(topology, weights):
             obs[2].flatten()), axis=0)
         obs = obs.reshape(1, -1)  # Garante (1, 14)
         action = model.predict(obs, verbose=0)
-        obs, reward, done, truncated, _ = env.step(action)
+        obs, reward, done, truncated, info = env.step(action)
         total_reward += reward
         if done or truncated:
             break
+    if print_info:
+        print("######## Info ########")
+        print(info)
     return reward,
 
 def evaluate_weights(weights, topology):  # Nova função com ordem invertida
@@ -150,7 +176,7 @@ toolbox_topology = base.Toolbox()
 toolbox_topology.register("individual", tools.initIterate, creator.Topology, init_topology)
 toolbox_topology.register("population", tools.initRepeat, list, toolbox_topology.individual)
 toolbox_topology.register("evaluate", evaluate)
-toolbox_topology.register("mate", tools.cxUniform, indpb=0.5)
+toolbox_topology.register("mate", tools.cxUniform, indpb=0.3)
 toolbox_topology.register("mutate", mutate_topology)
 # toolbox_topology.register("select", tools.selBest)
 toolbox_topology.register("select", tools.selTournament, tournsize=3)
@@ -161,9 +187,9 @@ toolbox_weights.register("individual", tools.initIterate, creator.Weights, init_
 toolbox_weights.register("population", tools.initRepeat, list, toolbox_weights.individual)
 # toolbox_weights.register("evaluate", evaluate_weights)
 toolbox_weights.register("evaluate", evaluate)
-toolbox_weights.register("mate", tools.cxUniform, indpb=0.5)
+toolbox_weights.register("mate", tools.cxUniform, indpb=0.7)
 # toolbox_weights.register("mutate", mutate_weights, indpb=0.1)
-toolbox_weights.register("mutate", tools.mutGaussian, mu=0, sigma=0.1, indpb=0.1)
+toolbox_weights.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.2)
 # toolbox_weights.register("select", tools.selTournament, tournsize=3)
 toolbox_weights.register("select", tools.selBest)
 toolbox_weights.register("map", pool.map)
@@ -219,13 +245,14 @@ n_population = 100
 elitism_rate = 0.1
 n_elite = int(n_population * elitism_rate)
 
-num_generations = 50
+num_generations = 100
 topology_pop = toolbox_topology.population(n=n_population)
 weights_pop = toolbox_weights.population(n=n_population)
 
 halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
 halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
 
+df = pd.DataFrame()
 for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
@@ -246,8 +273,16 @@ for gen in range(num_generations):
             best_weight = weights_pop[0]
 
         evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight)
-        fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop))
 
+        i = 0
+        while i < 5:
+            try:
+                fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop))
+                i = 5
+            except BrokenProcessPool:
+                i += 1
+                print("Erro no pool, tentando novamente...")
+            
         # Atribuir fitness
         for topology, fit in zip(topology_pop, fitnesses):
             topology.fitness.values = fit
@@ -279,22 +314,22 @@ for gen in range(num_generations):
     print("-"*64)
     print("Evolução de pesos")
     for _ in range(micro_gens):
-        # Avaliar pesos usando as melhores topologias
-        # for weights in weights_pop:
-        #     try:
-        #         best_topology = halloffame_topology[0]
-        #     except IndexError:  # Primeira geração
-        #         best_topology = topology_pop[0]
-        #     weights.fitness.values = toolbox_weights.evaluate(best_topology, weights)
-
         try:
             best_topology = halloffame_topology[0]
         except IndexError:  # Primeira geração
             best_topology = topology_pop[0]
         # Avaliar pesos em paralelo
         evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology)
-        fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop))
-        
+
+        i = 0
+        while i < 5:
+            try:
+                fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop))
+                i = 5
+            except BrokenProcessPool:
+                i += 1
+                print("Erro no pool, tentando novamente...")
+                
         # Atribuir fitness
         for weights, fit in zip(weights_pop, fitnesses):
             weights.fitness.values = fit
@@ -324,10 +359,22 @@ for gen in range(num_generations):
 
     print("MELHOR INDIVÍDUO:")
     print("Fitness:", halloffame_weights[0].fitness.values)
+    evaluate(halloffame_topology[0], halloffame_weights[0], print_info=True)
     print("-"*128)
 
-df_topology = pd.DataFrame(logbook_topology)
-df_topology.to_csv("topologia.csv", index=False)
+    best_individual = halloffame_topology[0] + halloffame_weights[0]
 
-df_weights = pd.DataFrame(logbook_weights)
-df_weights.to_csv("pesos.csv", index=False)
+    new_data = {
+        "index": [gen],
+        "individual": [best_individual]
+    }
+
+    new_df = pd.DataFrame(new_data)
+    df = pd.concat([df, new_df])
+    df.to_csv("best_individual.csv", index=False)
+
+    df_topology = pd.DataFrame(logbook_topology)
+    df_topology.to_csv("topologia.csv", index=False)
+
+    df_weights = pd.DataFrame(logbook_weights)
+    df_weights.to_csv("pesos.csv", index=False)
