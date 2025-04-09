@@ -24,10 +24,10 @@ NUM_PROCESSES = 4
 print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
-rng = random.Random(42)
-env = gym.make("GPS-Distance-v0", rng=rng)
+RNG = random.Random(42)
+env_base = gym.make("GPS-Distance-v0", rng=RNG)
 observation_space = 14
-action_space = env.action_space.shape[1]
+action_space = env_base.action_space.shape[1]
 print("Action Space:", action_space)
 
 # Parâmetros para limitar a evolução morfológica
@@ -126,10 +126,12 @@ def evaluate(topology, weights, print_info=False):
     model = build_model(topology)
     weights_vector = np.array(weights)
     vector_to_model_weights(model, weights_vector)
-
+    
+    env = gym.make("GPS-Distance-v0", rng=RNG)
     total_reward = 0
     obs, _ = env.reset()
     done = False
+    printed = True
     while not done:
         obs = np.concatenate((
             obs[0].flatten(), 
@@ -138,11 +140,16 @@ def evaluate(topology, weights, print_info=False):
         obs = obs.reshape(1, -1)  # Garante (1, 14)
         action = model.predict(obs, verbose=0)
         obs, reward, done, truncated, info = env.step(action)
+        if not printed:
+            print("Target Position:")
+            print(info["target position"])
+            printed= True
         total_reward += reward
         if done or truncated:
             break
     if print_info:
         print("######## Info ########")
+        print("Reward:", reward)
         print(info)
     return reward,
 
@@ -241,7 +248,7 @@ logbook_topology.header = ["geração", "média", "melhor", "pior"]
 logbook_weights = tools.Logbook()
 logbook_weights.header = ["geração", "média", "melhor", "pior"]
 
-n_population = 100
+n_population = 500
 elitism_rate = 0.1
 n_elite = int(n_population * elitism_rate)
 

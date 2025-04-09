@@ -24,10 +24,10 @@ NUM_PROCESSES = 6
 print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
-rng = random.Random(42)
-env = gym.make("GPS-Distance-v0", rng=rng)
+RNG = random.Random(42)
+env_base = gym.make("GPS-Distance-v0", rng=RNG)
 observation_space = 14
-action_space = env.action_space.shape[1]
+action_space = env_base.action_space.shape[1]
 print("Action Space:", action_space)
 
 # Parâmetros para limitar a evolução morfológica
@@ -125,6 +125,7 @@ def evaluate(topology, weights, print_info=False):
     vector_to_model_weights(model, weights_vector)
 
     total_reward = 0
+    env = gym.make("GPS-Distance-v0", rng=RNG)
     obs, _ = env.reset()
     done = False
     while not done:
@@ -140,6 +141,7 @@ def evaluate(topology, weights, print_info=False):
             break
     if print_info:
         print("######## Info ########")
+        print("Reward:", reward)
         print(info)
     return reward,
 
