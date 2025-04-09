@@ -48,9 +48,31 @@ pool = ProcessPoolExecutor(
 )
 # Função para construir uma rede com um número variável de neurônios na camada oculta
 def build_model(topology):
+    try:
+        if len(model_cache) > 10:
+            model_cache.popitem()  # Remove o modelo mais antigo
+    except NameError:
+        pass 
     key = tuple(topology)  # Topologia como chave do cache
 
-    if key not in model_cache:
+    try:
+        if key not in model_cache:
+            model = keras.models.Sequential()
+            model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
+
+            # Camadas Ocultas
+            num_layers = topology[0]
+            i = 1
+            for _ in range(num_layers):
+                # Garantir que está dentro do intervalo desejado
+                num_neurons = int(np.clip(topology[i], min_neurons, max_neurons))
+                model.add(layers.Dense(num_neurons, activation='relu'))
+                i += 1
+            model.add(layers.Dense(action_space, activation='tanh'))  # Ações
+            model_cache[key] = model
+
+        return keras.models.clone_model(model_cache[key])
+    except NameError:
         model = keras.models.Sequential()
         model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
 
@@ -63,9 +85,7 @@ def build_model(topology):
             model.add(layers.Dense(num_neurons, activation='relu'))
             i += 1
         model.add(layers.Dense(action_space, activation='tanh'))  # Ações
-        model_cache[key] = model
-
-    return keras.models.clone_model(model_cache[key])
+        return model
 
 # Função para obter os pesos e topologia (número de neurônios) da rede
 def model_weights_to_vector(model):
