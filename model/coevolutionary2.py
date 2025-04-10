@@ -306,7 +306,7 @@ for gen in range(num_generations):
         i = 0
         while i < 5:
             try:
-                fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop))
+                fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop, chunksize=n_population//NUM_PROCESSES))
                 i = 5
             except BrokenProcessPool:
                 i += 1
@@ -353,7 +353,7 @@ for gen in range(num_generations):
         i = 0
         while i < 5:
             try:
-                fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop))
+                fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop, chunksize=n_population//NUM_PROCESSES))
                 i = 5
             except BrokenProcessPool:
                 i += 1
