@@ -287,6 +287,8 @@ for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
 
+    best_weight = weights_pop[0] if gen == 0 else halloffame_weights[0]
+    evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight)
     for _ in range(micro_gens):
         # Avaliar topologias usando os melhores pesos
             # for topology in topology_pop:
@@ -296,20 +298,11 @@ for gen in range(num_generations):
             #         best_weight = weights_pop[0]
             #     topology.fitness.values = toolbox_topology.evaluate(topology, best_weight)
 
-        try:
-            best_weight = halloffame_weights[0]
-        except IndexError:  # Primeira geração
-            best_weight = weights_pop[0]
-
-        evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight)
-
-        i = 0
-        while i < 5:
+        for i in range(5):
             try:
-                fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop, chunksize=n_population//NUM_PROCESSES))
-                i = 5
+                fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop, chunksize=n_population//NUM_PROCESSES)
+                break
             except BrokenProcessPool:
-                i += 1
                 print("Erro no pool, tentando novamente...")
             
         # Atribuir fitness
@@ -342,21 +335,15 @@ for gen in range(num_generations):
     
     print("-"*64)
     print("Evolução de pesos")
+    best_topology = topology_pop[0] if gen == 0 else halloffame_topology[0]
+    # Avaliar pesos em paralelo
+    evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology)
     for _ in range(micro_gens):
-        try:
-            best_topology = halloffame_topology[0]
-        except IndexError:  # Primeira geração
-            best_topology = topology_pop[0]
-        # Avaliar pesos em paralelo
-        evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology)
-
-        i = 0
-        while i < 5:
+        for i in range(5):
             try:
-                fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop, chunksize=n_population//NUM_PROCESSES))
-                i = 5
+                fitnesses = toolbox_weights.map(evaluate_with_topology, weights_pop, chunksize=n_population//NUM_PROCESSES)
+                break
             except BrokenProcessPool:
-                i += 1
                 print("Erro no pool, tentando novamente...")
                 
         # Atribuir fitness
