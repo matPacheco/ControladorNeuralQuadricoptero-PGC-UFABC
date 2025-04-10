@@ -16,6 +16,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
+from argparse import ArgumentParser
 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
@@ -188,6 +189,13 @@ def init_weights():
 
     return weights
 
+parser = ArgumentParser()
+parser.add_argument("-p", "--population", default=500, type=int)
+parser.add_argument("-g", "--generations", default=100, type=int)
+parser.add_argument("-e", "--elitism", default=0.1, type=float)
+parser.add_argument("-m", "--microgens", default=3, type=int)
+args = parser.parse_args()
+
 # Configuração do DEAP
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Topology", list, fitness=creator.FitnessMax) 
@@ -262,11 +270,11 @@ logbook_topology.header = ["geração", "média", "melhor", "pior"]
 logbook_weights = tools.Logbook()
 logbook_weights.header = ["geração", "média", "melhor", "pior"]
 
-n_population = 500
-elitism_rate = 0.1
+n_population = args.population
+elitism_rate = args.elitism
 n_elite = int(n_population * elitism_rate)
 
-num_generations = 100
+num_generations = args.generations
 topology_pop = toolbox_topology.population(n=n_population)
 weights_pop = toolbox_weights.population(n=n_population)
 
@@ -274,12 +282,12 @@ halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
 halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
 
 df = pd.DataFrame()
+micro_gens = args.microgens
 for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
-    micro_gens = 3
 
-    for _ in range(micro_gens):     
+    for _ in range(micro_gens):
         # Avaliar topologias usando os melhores pesos
             # for topology in topology_pop:
             #     try:
