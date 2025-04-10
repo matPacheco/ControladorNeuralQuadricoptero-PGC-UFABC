@@ -16,6 +16,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
+from argparse import ArgumentParser
 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
@@ -25,7 +26,7 @@ print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
 RNG = random.Random(42)
-env_base = gym.make("GPS-Distance-v0", rng=RNG)
+env_base = gym.make("GPS-Distance-v0", rng=0.)
 observation_space = 14
 action_space = env_base.action_space.shape[1]
 print("Action Space:", action_space)
@@ -136,12 +137,12 @@ def mutate_topology(individual, mutation_rate=0.3):
 
     return individual,
 
-def evaluate(topology, weights, print_info=False):
+def evaluate(topology, weights, print_info=False, rng=0.0):
     model = build_model(topology)
     weights_vector = np.array(weights)
     vector_to_model_weights(model, weights_vector)
     
-    env = gym.make("GPS-Distance-v0", rng=RNG)
+    env = gym.make("GPS-Distance-v0", rng=rng)
     total_reward = 0
     obs, _ = env.reset()
     done = False
@@ -187,6 +188,13 @@ def init_weights():
     weights = np.random.randn(num_max_weights).astype(np.float64).tolist()
 
     return weights
+
+parser = ArgumentParser()
+parser.add_argument("-p", "--population", default=500, type=int)
+parser.add_argument("-g", "--generations", default=100, type=int)
+parser.add_argument("-e", "--elitism", default=0.1, type=float)
+parser.add_argument("-m", "--microgens", default=3, type=int)
+args = parser.parse_args()
 
 # Configuração do DEAP
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
@@ -262,11 +270,11 @@ logbook_topology.header = ["geração", "média", "melhor", "pior"]
 logbook_weights = tools.Logbook()
 logbook_weights.header = ["geração", "média", "melhor", "pior"]
 
-n_population = 500
-elitism_rate = 0.1
+n_population = args.population
+elitism_rate = args.elitism
 n_elite = int(n_population * elitism_rate)
 
-num_generations = 100
+num_generations = args.generations
 topology_pop = toolbox_topology.population(n=n_population)
 weights_pop = toolbox_weights.population(n=n_population)
 
@@ -274,12 +282,16 @@ halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
 halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
 
 df = pd.DataFrame()
+micro_gens = args.microgens
 for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
-    micro_gens = 3
 
-    for _ in range(micro_gens):     
+    rng = RNG.random()
+
+    best_weight = weights_pop[0] if gen == 0 else halloffame_weights[0]
+    evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight, rng=rng)
+    for _ in range(micro_gens):
         # Avaliar topologias usando os melhores pesos
             # for topology in topology_pop:
             #     try:
@@ -288,20 +300,11 @@ for gen in range(num_generations):
             #         best_weight = weights_pop[0]
             #     topology.fitness.values = toolbox_topology.evaluate(topology, best_weight)
 
-        try:
-            best_weight = halloffame_weights[0]
-        except IndexError:  # Primeira geração
-            best_weight = weights_pop[0]
-
-        evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight)
-
-        i = 0
-        while i < 5:
+        for i in range(5):
             try:
-                fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop))
-                i = 5
+                fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop, chunksize=n_population//NUM_PROCESSES)
+                break
             except BrokenProcessPool:
-                i += 1
                 print("Erro no pool, tentando novamente...")
             
         # Atribuir fitness
@@ -334,21 +337,15 @@ for gen in range(num_generations):
     
     print("-"*64)
     print("Evolução de pesos")
+    best_topology = topology_pop[0] if gen == 0 else halloffame_topology[0]
+    # Avaliar pesos em paralelo
+    evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology, rng=rng)
     for _ in range(micro_gens):
-        try:
-            best_topology = halloffame_topology[0]
-        except IndexError:  # Primeira geração
-            best_topology = topology_pop[0]
-        # Avaliar pesos em paralelo
-        evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology)
-
-        i = 0
-        while i < 5:
+        for i in range(5):
             try:
-                fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop))
-                i = 5
+                fitnesses = toolbox_weights.map(evaluate_with_topology, weights_pop, chunksize=n_population//NUM_PROCESSES)
+                break
             except BrokenProcessPool:
-                i += 1
                 print("Erro no pool, tentando novamente...")
                 
         # Atribuir fitness
@@ -380,7 +377,7 @@ for gen in range(num_generations):
 
     print("MELHOR INDIVÍDUO:")
     print("Fitness:", halloffame_weights[0].fitness.values)
-    evaluate(halloffame_topology[0], halloffame_weights[0], print_info=True)
+    evaluate(halloffame_topology[0], halloffame_weights[0], print_info=True, rng=rng)
     print("-"*128)
 
     best_individual = halloffame_topology[0] + halloffame_weights[0]
