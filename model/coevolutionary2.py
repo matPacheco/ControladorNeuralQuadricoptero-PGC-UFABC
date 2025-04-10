@@ -26,7 +26,7 @@ print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
 RNG = random.Random(42)
-env_base = gym.make("GPS-Distance-v0", rng=RNG)
+env_base = gym.make("GPS-Distance-v0", rng=0.)
 observation_space = 14
 action_space = env_base.action_space.shape[1]
 print("Action Space:", action_space)
@@ -137,12 +137,12 @@ def mutate_topology(individual, mutation_rate=0.3):
 
     return individual,
 
-def evaluate(topology, weights, print_info=False):
+def evaluate(topology, weights, print_info=False, rng=0.0):
     model = build_model(topology)
     weights_vector = np.array(weights)
     vector_to_model_weights(model, weights_vector)
     
-    env = gym.make("GPS-Distance-v0", rng=RNG)
+    env = gym.make("GPS-Distance-v0", rng=rng)
     total_reward = 0
     obs, _ = env.reset()
     done = False
@@ -287,8 +287,10 @@ for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
 
+    rng = RNG.random()
+
     best_weight = weights_pop[0] if gen == 0 else halloffame_weights[0]
-    evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight)
+    evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight, rng=rng)
     for _ in range(micro_gens):
         # Avaliar topologias usando os melhores pesos
             # for topology in topology_pop:
@@ -337,7 +339,7 @@ for gen in range(num_generations):
     print("Evolução de pesos")
     best_topology = topology_pop[0] if gen == 0 else halloffame_topology[0]
     # Avaliar pesos em paralelo
-    evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology)
+    evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology, rng=rng)
     for _ in range(micro_gens):
         for i in range(5):
             try:
@@ -375,7 +377,7 @@ for gen in range(num_generations):
 
     print("MELHOR INDIVÍDUO:")
     print("Fitness:", halloffame_weights[0].fitness.values)
-    evaluate(halloffame_topology[0], halloffame_weights[0], print_info=True)
+    evaluate(halloffame_topology[0], halloffame_weights[0], print_info=True, rng=rng)
     print("-"*128)
 
     best_individual = halloffame_topology[0] + halloffame_weights[0]
