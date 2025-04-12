@@ -282,7 +282,7 @@ halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
 halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
 
 df = pd.DataFrame()
-micro_gens = args.microgens
+
 for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
@@ -300,12 +300,23 @@ for gen in range(num_generations):
             #         best_weight = weights_pop[0]
             #     topology.fitness.values = toolbox_topology.evaluate(topology, best_weight)
 
+        completed = False
         for i in range(5):
             try:
                 fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop, chunksize=n_population//NUM_PROCESSES)
                 break
             except BrokenProcessPool:
                 print("Erro no pool, tentando novamente...")
+
+                pool.shutdown(wait=True)  # Encerra o pool atual
+                # Cria um novo pool e atualiza a referência nos workers do toolbox
+                pool = ProcessPoolExecutor(max_workers=NUM_PROCESSES, initializer=init_worker)
+                toolbox_topology.register("map", pool.map)
+                toolbox_weights.register("map", pool.map)
+
+        if not completed:
+            raise RuntimeError("Falha ao avaliar em paralelo após várias tentativas.")
+
             
         # Atribuir fitness
         for topology, fit in zip(topology_pop, fitnesses):
@@ -340,13 +351,25 @@ for gen in range(num_generations):
     best_topology = topology_pop[0] if gen == 0 else halloffame_topology[0]
     # Avaliar pesos em paralelo
     evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology, rng=rng)
+
+    completed = False
     for _ in range(micro_gens):
         for i in range(5):
             try:
                 fitnesses = toolbox_weights.map(evaluate_with_topology, weights_pop, chunksize=n_population//NUM_PROCESSES)
+                completed = True
                 break
             except BrokenProcessPool:
-                print("Erro no pool, tentando novamente...")
+                print("Erro no pool, reinicializando o ProcessPoolExecutor...")
+
+                pool.shutdown(wait=True)  # Encerra o pool atual
+                # Cria um novo pool e atualiza a referência nos workers do toolbox
+                pool = ProcessPoolExecutor(max_workers=NUM_PROCESSES, initializer=init_worker)
+                toolbox_topology.register("map", pool.map)
+                toolbox_weights.register("map", pool.map)
+
+        if not completed:
+            raise RuntimeError("Falha ao avaliar em paralelo após várias tentativas.")
                 
         # Atribuir fitness
         for weights, fit in zip(weights_pop, fitnesses):
