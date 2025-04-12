@@ -50,47 +50,6 @@ pool = ProcessPoolExecutor(
     initializer=init_worker  # Inicializa cada worker
 )
 
-# Função para construir uma rede com um número variável de neurônios na camada oculta
-# def build_model(topology):
-#     try:
-#         if len(model_cache) > 10:
-#             model_cache.popitem()  # Remove o modelo mais antigo
-#     except NameError:
-#         pass 
-#     key = tuple(topology)  # Topologia como chave do cache
-
-#     try:
-#         if key not in model_cache:
-#             model = keras.models.Sequential()
-#             model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
-
-#             # Camadas Ocultas
-#             num_layers = topology[0]
-#             i = 1
-#             for _ in range(num_layers):
-#                 # Garantir que está dentro do intervalo desejado
-#                 num_neurons = int(np.clip(topology[i], min_neurons, max_neurons))
-#                 model.add(layers.Dense(num_neurons, activation='relu'))
-#                 i += 1
-#             model.add(layers.Dense(action_space, activation='tanh'))  # Ações
-#             model_cache[key] = model
-
-#         return keras.models.clone_model(model_cache[key])
-#     except NameError:
-#         model = keras.models.Sequential()
-#         model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
-
-#         # Camadas Ocultas
-#         num_layers = topology[0]
-#         i = 1
-#         for _ in range(num_layers):
-#             # Garantir que está dentro do intervalo desejado
-#             num_neurons = int(np.clip(topology[i], min_neurons, max_neurons))
-#             model.add(layers.Dense(num_neurons, activation='relu'))
-#             i += 1
-#         model.add(layers.Dense(action_space, activation='tanh'))  # Ações
-#         return model
-    
 def build_model(topology):
     model = keras.models.Sequential()
     model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
@@ -223,10 +182,13 @@ def set_evolution(checkpoint=False):
         halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
         
         logbook_topology = tools.Logbook()
-        logbook_topology.header = ["geração", "média", "melhor", "pior"]
+        logbook_topology.header = ["gen", "fitness", "num_layers", "num_neurons_per_layer"]
+        logbook_topology.chapters["fitness"].header = ["média", "maior", "menor", "std"]
+        logbook_topology.chapters["num_layers"].header = ["média", "maior", "menor", "std"]
+        logbook_topology.chapters["num_neurons_per_layer"].header = ["média", "maior", "menor", "std"]
 
         logbook_weights = tools.Logbook()
-        logbook_weights.header = ["geração", "média", "melhor", "pior"]
+        logbook_weights.header = ["gen", "média", "melhor", "pior"]
 
     return topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, logbook_topology, logbook_weights
 
@@ -265,45 +227,26 @@ toolbox_weights.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.2
 toolbox_weights.register("select", tools.selBest)
 toolbox_weights.register("map", pool.map)
 
-# # Estatísticas
-# stats_fit = tools.Statistics(key=lambda ind: ind.fitness.values[0])
-# stats_num_layers = tools.Statistics(key=lambda ind: ind[0])
-# stats_num_neurons = tools.Statistics(key=lambda ind: int(np.mean(ind[1:11])))
-# mstats_topology = tools.MultiStatistics(fitness=stats_fit, num_layers=stats_num_layers, num_neurons_per_layer=stats_num_neurons)
-
-# mstats_topology.register("avg", lambda values: np.round(np.mean(values), 1))
-# mstats_topology.register("std", lambda values: np.round(np.std(values), 1))
-# mstats_topology.register("min", lambda values: np.round(np.min(values), 1))
-# mstats_topology.register("max", lambda values: np.round(np.max(values), 1))
-
-# # Logbook Topologia
-# logbook_topology = tools.Logbook()
-# logbook_topology.header = ["gen", "fitness", "layers", "neurons"]
-# logbook_topology.chapters["fitness"].header = ["avg", "min", "max"]
-# logbook_topology.chapters["layers"].header = ["avg", "min", "max"]
-# logbook_topology.chapters["neurons"].header = ["avg", "min", "max"]
-
-# # Estatísticas de pesos
-# stats_fit_weights = tools.Statistics(key=lambda ind: ind.fitness.values[0])
-# mstats_weights = tools.MultiStatistics(fitness=stats_fit_weights)
-# mstats_weights["fitness"].register("avg", np.mean)
-# mstats_weights["fitness"].register("min", np.min)
-# mstats_weights["fitness"].register("max", np.max)
-
-# logbook_weights = tools.Logbook()
-# logbook_weights.header = ["gen", "fitness"]
-# logbook_weights.chapters["fitness"].header = ["avg", "min", "max"]
-
 # Configurar estatísticas
-stats_topology = tools.Statistics(key=lambda ind: ind.fitness.values[0])
+fitness_topology = tools.Statistics(key=lambda ind: ind.fitness.values[0])
+stats_num_neurons = tools.Statistics(key=lambda ind: int(np.mean(ind[1:11])))
+stats_num_layers = tools.Statistics(key=lambda ind: ind[0])
+stats_topology = tools.MultiStatistics(
+    fitness=fitness_topology, 
+    num_layers=stats_num_layers, 
+    num_neurons_per_layer=stats_num_neurons
+)
+
 stats_topology.register("média", np.mean)
-stats_topology.register("melhor", max)
-stats_topology.register("pior", min)
+stats_topology.register("maior", np.max)
+stats_topology.register("menor", np.min)
+stats_topology.register("std", lambda values: np.round(np.std(values), 1))
 
 stats_weights = tools.Statistics(key=lambda ind: ind.fitness.values[0])
 stats_weights.register("média", np.mean)
 stats_weights.register("melhor", max)
 stats_weights.register("pior", min)
+stats_topology.register("std", lambda values: np.round(np.std(values), 2))
 
 n_population = args.population
 elitism_rate = args.elitism
@@ -324,18 +267,11 @@ for gen in range(num_generations):
     best_weight = weights_pop[0] if gen == 0 else halloffame_weights[0]
     evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight, rng=rng)
     for _ in range(micro_gens):
-        # Avaliar topologias usando os melhores pesos
-            # for topology in topology_pop:
-            #     try:
-            #         best_weight = halloffame_weights[0]
-            #     except IndexError:  # Primeira geração
-            #         best_weight = weights_pop[0]
-            #     topology.fitness.values = toolbox_topology.evaluate(topology, best_weight)
-
         completed = False
         for i in range(5):
             try:
                 fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop)
+                completed = True
                 break
             except BrokenProcessPool:
                 print("Erro no pool, tentando novamente...")
