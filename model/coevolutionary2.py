@@ -258,7 +258,7 @@ topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, l
 
 df = pd.DataFrame()
 micro_gens = args.microgens
-for gen in range(num_generations):
+for gen in range(start_gen, num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
 
