@@ -166,6 +166,7 @@ def evaluate(topology, weights, print_info=False, rng=0.0):
         print("######## Info ########")
         print("Reward:", reward)
         print(info)
+    env.close()
     return reward,
 
 def evaluate_weights(weights, topology):  # Nova função com ordem invertida
