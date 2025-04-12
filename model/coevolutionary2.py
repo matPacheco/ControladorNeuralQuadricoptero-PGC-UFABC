@@ -10,6 +10,8 @@ import keras
 from keras import layers
 from keras import backend as K
 
+import pickle
+
 import os
 import random
 import multiprocessing
@@ -190,11 +192,50 @@ def init_weights():
 
     return weights
 
+def set_evolution(checkpoint=False):
+    if checkpoint:
+        with open("checkpoint.pkl", "rb") as cp_file:
+            cp = pickle.load(cp_file)
+
+        topology_pop = cp["topology_pop"]
+        weights_pop = cp["weights_pop"]
+
+        start_gen = cp["generation"]
+
+        halloffame_topology = cp["halloffame_topology"]
+        halloffame_weights = cp["halloffame_weights"]
+
+        logbook_topology = cp["logbook_topology"]
+        logbook_weights = cp["logbook_weights"]
+
+        random.setstate(cp["rndstate"])
+
+        global RNG
+        RNG = cp["rng_obj"]
+        print("Checkpoint carregado com sucesso.")
+    else:
+        topology_pop = toolbox_topology.population(n=n_population)
+        weights_pop = toolbox_weights.population(n=n_population)
+
+        start_gen = 0
+
+        halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
+        halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
+        
+        logbook_topology = tools.Logbook()
+        logbook_topology.header = ["geração", "média", "melhor", "pior"]
+
+        logbook_weights = tools.Logbook()
+        logbook_weights.header = ["geração", "média", "melhor", "pior"]
+
+    return topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, logbook_topology, logbook_weights
+
 parser = ArgumentParser()
 parser.add_argument("-p", "--population", default=500, type=int)
 parser.add_argument("-g", "--generations", default=100, type=int)
 parser.add_argument("-e", "--elitism", default=0.1, type=float)
 parser.add_argument("-m", "--microgens", default=3, type=int)
+parser.add_argument("-c", "--checkpoint", default=False, type=bool)
 args = parser.parse_args()
 
 # Configuração do DEAP
@@ -264,23 +305,13 @@ stats_weights.register("média", np.mean)
 stats_weights.register("melhor", max)
 stats_weights.register("pior", min)
 
-# Configurar logbooks
-logbook_topology = tools.Logbook()
-logbook_topology.header = ["geração", "média", "melhor", "pior"]
-
-logbook_weights = tools.Logbook()
-logbook_weights.header = ["geração", "média", "melhor", "pior"]
-
 n_population = args.population
 elitism_rate = args.elitism
 n_elite = int(n_population * elitism_rate)
 
 num_generations = args.generations
-topology_pop = toolbox_topology.population(n=n_population)
-weights_pop = toolbox_weights.population(n=n_population)
 
-halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
-halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
+topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, logbook_topology, logbook_weights = set_evolution(checkpoint=args.checkpoint)
 
 df = pd.DataFrame()
 micro_gens = args.microgens
@@ -420,3 +451,11 @@ for gen in range(num_generations):
 
     df_weights = pd.DataFrame(logbook_weights)
     df_weights.to_csv("pesos.csv", index=False)
+
+    cp = dict(topology_pop=topology_pop, weights_pop=weights_pop, generation=gen, 
+              halloffame_topology=halloffame_topology, halloffame_weights=halloffame_weights, 
+              logbook_topology=logbook_topology, logbook_weights=logbook_weights, rndstate=random.getstate(),
+              rng_obj=RNG)
+
+    with open("checkpoint_name.pkl", "wb") as cp_file:
+        pickle.dump(cp, cp_file)
