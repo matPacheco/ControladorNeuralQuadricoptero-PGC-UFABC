@@ -393,5 +393,5 @@ for gen in range(num_generations):
               logbook_topology=logbook_topology, logbook_weights=logbook_weights, rndstate=random.getstate(),
               rng_obj=RNG)
 
-    with open("checkpoint_name.pkl", "wb") as cp_file:
+    with open("checkpoint.pkl", "wb") as cp_file:
         pickle.dump(cp, cp_file)
