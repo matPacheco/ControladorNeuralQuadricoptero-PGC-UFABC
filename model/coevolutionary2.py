@@ -283,7 +283,7 @@ halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
 halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
 
 df = pd.DataFrame()
-
+micro_gens = args.microgens
 for gen in range(num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
@@ -304,7 +304,7 @@ for gen in range(num_generations):
         completed = False
         for i in range(5):
             try:
-                fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop, chunksize=n_population//NUM_PROCESSES)
+                fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop)
                 break
             except BrokenProcessPool:
                 print("Erro no pool, tentando novamente...")
@@ -357,7 +357,7 @@ for gen in range(num_generations):
     for _ in range(micro_gens):
         for i in range(5):
             try:
-                fitnesses = toolbox_weights.map(evaluate_with_topology, weights_pop, chunksize=n_population//NUM_PROCESSES)
+                fitnesses = toolbox_weights.map(evaluate_with_topology, weights_pop)
                 completed = True
                 break
             except BrokenProcessPool:
