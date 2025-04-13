@@ -10,23 +10,27 @@ import keras
 from keras import layers
 from keras import backend as K
 
+import pickle
+
 import os
 import random
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from functools import partial
+from argparse import ArgumentParser
 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
 NUM_PROCESSES = multiprocessing.cpu_count()
-NUM_PROCESSES = 6
+NUM_PROCESSES = 4
 print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
-rng = random.Random(42)
-env = gym.make("GPS-Distance-v0", rng=rng)
+RNG = random.Random(42)
+env_base = gym.make("GPS-Distance-v0", rng=0.)
 observation_space = 14
-action_space = env.action_space.shape[1]
+action_space = env_base.action_space.shape[1]
 print("Action Space:", action_space)
 
 # Parâmetros para limitar a evolução morfológica
@@ -46,26 +50,21 @@ pool = ProcessPoolExecutor(
     initializer=init_worker  # Inicializa cada worker
 )
 
-# Função para construir uma rede com um número variável de neurônios na camada oculta
 def build_model(topology):
-    key = tuple(topology)  # Topologia como chave do cache
+    model = keras.models.Sequential()
+    model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
 
-    if key not in model_cache:
-        model = keras.models.Sequential()
-        model.add(layers.Input((observation_space,)))  # Definir a entrada do modelo
-
-        # Camadas Ocultas
-        num_layers = topology[0]
-        i = 1
-        for _ in range(num_layers):
-            # Garantir que está dentro do intervalo desejado
-            num_neurons = int(np.clip(topology[i], min_neurons, max_neurons))
-            model.add(layers.Dense(num_neurons, activation='relu'))
-            i += 1
-        model.add(layers.Dense(action_space, activation='tanh'))  # Ações
-        model_cache[key] = model
-
-    return keras.models.clone_model(model_cache[key])
+    # Camadas Ocultas
+    num_layers = topology[0]
+    i = 1
+    for _ in range(num_layers):
+        # Garantir que está dentro do intervalo desejado
+        num_neurons = int(np.clip(topology[i], min_neurons, max_neurons))
+        model.add(layers.Dense(num_neurons, activation='relu'))
+        i += 1
+    model.add(layers.Dense(action_space, activation='tanh'))  # Ações
+    return model
+    
 
 # Função para obter os pesos e topologia (número de neurônios) da rede
 def model_weights_to_vector(model):
@@ -85,7 +84,7 @@ def vector_to_model_weights(model, weight_vector):
             idx += size
     model.set_weights(new_weights)
 
-def mutate_topology(individual, mutation_rate=0.1):
+def mutate_topology(individual, mutation_rate=0.3):
     if np.random.rand() < mutation_rate:  # 10% de chance de mutação na quantidade de camadas
         choice = int(np.random.choice([-1, 1]))
         individual[0] = int(np.clip(individual[0] + choice, min_layers, max_layers))
@@ -99,14 +98,16 @@ def mutate_topology(individual, mutation_rate=0.1):
 
     return individual,
 
-def evaluate(topology, weights):
+def evaluate(topology, weights, print_info=False, rng=0.0):
     model = build_model(topology)
     weights_vector = np.array(weights)
     vector_to_model_weights(model, weights_vector)
-
+    
+    env = gym.make("GPS-Distance-v0", rng=rng)
     total_reward = 0
     obs, _ = env.reset()
     done = False
+    printed = True
     while not done:
         obs = np.concatenate((
             obs[0].flatten(), 
@@ -114,10 +115,19 @@ def evaluate(topology, weights):
             obs[2].flatten()), axis=0)
         obs = obs.reshape(1, -1)  # Garante (1, 14)
         action = model.predict(obs, verbose=0)
-        obs, reward, done, truncated, _ = env.step(action)
+        obs, reward, done, truncated, info = env.step(action)
+        if not printed:
+            print("Target Position:")
+            print(info["target position"])
+            printed= True
         total_reward += reward
         if done or truncated:
             break
+    if print_info:
+        print("######## Info ########")
+        print("Reward:", reward)
+        print(info)
+    env.close()
     return reward,
 
 def evaluate_weights(weights, topology):  # Nova função com ordem invertida
@@ -141,6 +151,55 @@ def init_weights():
 
     return weights
 
+def set_evolution(checkpoint=False):
+    if checkpoint:
+        with open("checkpoint.pkl", "rb") as cp_file:
+            cp = pickle.load(cp_file)
+
+        topology_pop = cp["topology_pop"]
+        weights_pop = cp["weights_pop"]
+
+        start_gen = cp["generation"]
+
+        halloffame_topology = cp["halloffame_topology"]
+        halloffame_weights = cp["halloffame_weights"]
+
+        logbook_topology = cp["logbook_topology"]
+        logbook_weights = cp["logbook_weights"]
+
+        random.setstate(cp["rndstate"])
+
+        global RNG
+        RNG = cp["rng_obj"]
+        print("Checkpoint carregado com sucesso.")
+    else:
+        topology_pop = toolbox_topology.population(n=n_population)
+        weights_pop = toolbox_weights.population(n=n_population)
+
+        start_gen = 0
+
+        halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
+        halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
+        
+        logbook_topology = tools.Logbook()
+        logbook_topology.header = ["gen", "fitness", "num_layers", "num_neurons_per_layer"]
+        logbook_topology.chapters["fitness"].header = ["média", "maior", "menor", "std"]
+        logbook_topology.chapters["num_layers"].header = ["média", "maior", "menor", "std"]
+        logbook_topology.chapters["num_neurons_per_layer"].header = ["média", "maior", "menor", "std"]
+
+        logbook_weights = tools.Logbook()
+        logbook_weights.header = ["gen", "média", "melhor", "pior"]
+
+    return topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, logbook_topology, logbook_weights
+
+parser = ArgumentParser()
+parser.add_argument("-p", "--population", default=500, type=int)
+parser.add_argument("-g", "--generations", default=100, type=int)
+parser.add_argument("-e", "--elitism", default=0.1, type=float)
+parser.add_argument("-m", "--microgens", default=3, type=int)
+parser.add_argument("-c", "--checkpoint", default=False, type=bool)
+args = parser.parse_args()
+
 # Configuração do DEAP
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Topology", list, fitness=creator.FitnessMax) 
@@ -150,7 +209,7 @@ toolbox_topology = base.Toolbox()
 toolbox_topology.register("individual", tools.initIterate, creator.Topology, init_topology)
 toolbox_topology.register("population", tools.initRepeat, list, toolbox_topology.individual)
 toolbox_topology.register("evaluate", evaluate)
-toolbox_topology.register("mate", tools.cxUniform, indpb=0.5)
+toolbox_topology.register("mate", tools.cxUniform, indpb=0.3)
 toolbox_topology.register("mutate", mutate_topology)
 # toolbox_topology.register("select", tools.selBest)
 toolbox_topology.register("select", tools.selTournament, tournsize=3)
@@ -161,93 +220,72 @@ toolbox_weights.register("individual", tools.initIterate, creator.Weights, init_
 toolbox_weights.register("population", tools.initRepeat, list, toolbox_weights.individual)
 # toolbox_weights.register("evaluate", evaluate_weights)
 toolbox_weights.register("evaluate", evaluate)
-toolbox_weights.register("mate", tools.cxUniform, indpb=0.5)
+toolbox_weights.register("mate", tools.cxUniform, indpb=0.7)
 # toolbox_weights.register("mutate", mutate_weights, indpb=0.1)
-toolbox_weights.register("mutate", tools.mutGaussian, mu=0, sigma=0.1, indpb=0.1)
+toolbox_weights.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.2)
 # toolbox_weights.register("select", tools.selTournament, tournsize=3)
 toolbox_weights.register("select", tools.selBest)
 toolbox_weights.register("map", pool.map)
 
-# # Estatísticas
-# stats_fit = tools.Statistics(key=lambda ind: ind.fitness.values[0])
-# stats_num_layers = tools.Statistics(key=lambda ind: ind[0])
-# stats_num_neurons = tools.Statistics(key=lambda ind: int(np.mean(ind[1:11])))
-# mstats_topology = tools.MultiStatistics(fitness=stats_fit, num_layers=stats_num_layers, num_neurons_per_layer=stats_num_neurons)
-
-# mstats_topology.register("avg", lambda values: np.round(np.mean(values), 1))
-# mstats_topology.register("std", lambda values: np.round(np.std(values), 1))
-# mstats_topology.register("min", lambda values: np.round(np.min(values), 1))
-# mstats_topology.register("max", lambda values: np.round(np.max(values), 1))
-
-# # Logbook Topologia
-# logbook_topology = tools.Logbook()
-# logbook_topology.header = ["gen", "fitness", "layers", "neurons"]
-# logbook_topology.chapters["fitness"].header = ["avg", "min", "max"]
-# logbook_topology.chapters["layers"].header = ["avg", "min", "max"]
-# logbook_topology.chapters["neurons"].header = ["avg", "min", "max"]
-
-# # Estatísticas de pesos
-# stats_fit_weights = tools.Statistics(key=lambda ind: ind.fitness.values[0])
-# mstats_weights = tools.MultiStatistics(fitness=stats_fit_weights)
-# mstats_weights["fitness"].register("avg", np.mean)
-# mstats_weights["fitness"].register("min", np.min)
-# mstats_weights["fitness"].register("max", np.max)
-
-# logbook_weights = tools.Logbook()
-# logbook_weights.header = ["gen", "fitness"]
-# logbook_weights.chapters["fitness"].header = ["avg", "min", "max"]
-
 # Configurar estatísticas
-stats_topology = tools.Statistics(key=lambda ind: ind.fitness.values[0])
+fitness_topology = tools.Statistics(key=lambda ind: ind.fitness.values[0])
+stats_num_neurons = tools.Statistics(key=lambda ind: int(np.mean(ind[1:11])))
+stats_num_layers = tools.Statistics(key=lambda ind: ind[0])
+stats_topology = tools.MultiStatistics(
+    fitness=fitness_topology, 
+    num_layers=stats_num_layers, 
+    num_neurons_per_layer=stats_num_neurons
+)
+
 stats_topology.register("média", np.mean)
-stats_topology.register("melhor", max)
-stats_topology.register("pior", min)
+stats_topology.register("maior", np.max)
+stats_topology.register("menor", np.min)
+stats_topology.register("std", lambda values: np.round(np.std(values), 1))
 
 stats_weights = tools.Statistics(key=lambda ind: ind.fitness.values[0])
 stats_weights.register("média", np.mean)
 stats_weights.register("melhor", max)
 stats_weights.register("pior", min)
+stats_topology.register("std", lambda values: np.round(np.std(values), 2))
 
-# Configurar logbooks
-logbook_topology = tools.Logbook()
-logbook_topology.header = ["geração", "média", "melhor", "pior"]
-
-logbook_weights = tools.Logbook()
-logbook_weights.header = ["geração", "média", "melhor", "pior"]
-
-n_population = 100
-elitism_rate = 0.1
+n_population = args.population
+elitism_rate = args.elitism
 n_elite = int(n_population * elitism_rate)
 
-num_generations = 50
-topology_pop = toolbox_topology.population(n=n_population)
-weights_pop = toolbox_weights.population(n=n_population)
+num_generations = args.generations
 
-halloffame_topology = tools.HallOfFame(5, similar=np.array_equal)
-halloffame_weights = tools.HallOfFame(5, similar=np.array_equal)
+topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, logbook_topology, logbook_weights = set_evolution(checkpoint=args.checkpoint)
 
-for gen in range(num_generations):
+df = pd.DataFrame()
+micro_gens = args.microgens
+for gen in range(start_gen, num_generations):
     print(f"Geração {gen}")	
     print("Evolução topológica:")
-    micro_gens = 3
 
-    for _ in range(micro_gens):     
-        # Avaliar topologias usando os melhores pesos
-            # for topology in topology_pop:
-            #     try:
-            #         best_weight = halloffame_weights[0]
-            #     except IndexError:  # Primeira geração
-            #         best_weight = weights_pop[0]
-            #     topology.fitness.values = toolbox_topology.evaluate(topology, best_weight)
+    rng = RNG.random()
 
-        try:
-            best_weight = halloffame_weights[0]
-        except IndexError:  # Primeira geração
-            best_weight = weights_pop[0]
+    best_weight = weights_pop[0] if gen == 0 else halloffame_weights[0]
+    evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight, rng=rng)
+    for _ in range(micro_gens):
+        completed = False
+        for i in range(5):
+            try:
+                fitnesses = toolbox_topology.map(evaluate_with_weight, topology_pop)
+                completed = True
+                break
+            except BrokenProcessPool:
+                print("Erro no pool, tentando novamente...")
 
-        evaluate_with_weight = partial(toolbox_topology.evaluate, weights=best_weight)
-        fitnesses = list(toolbox_topology.map(evaluate_with_weight, topology_pop))
+                pool.shutdown(wait=True)  # Encerra o pool atual
+                # Cria um novo pool e atualiza a referência nos workers do toolbox
+                pool = ProcessPoolExecutor(max_workers=NUM_PROCESSES, initializer=init_worker)
+                toolbox_topology.register("map", pool.map)
+                toolbox_weights.register("map", pool.map)
 
+        if not completed:
+            raise RuntimeError("Falha ao avaliar em paralelo após várias tentativas.")
+
+            
         # Atribuir fitness
         for topology, fit in zip(topology_pop, fitnesses):
             topology.fitness.values = fit
@@ -278,23 +316,29 @@ for gen in range(num_generations):
     
     print("-"*64)
     print("Evolução de pesos")
-    for _ in range(micro_gens):
-        # Avaliar pesos usando as melhores topologias
-        # for weights in weights_pop:
-        #     try:
-        #         best_topology = halloffame_topology[0]
-        #     except IndexError:  # Primeira geração
-        #         best_topology = topology_pop[0]
-        #     weights.fitness.values = toolbox_weights.evaluate(best_topology, weights)
+    best_topology = topology_pop[0] if gen == 0 else halloffame_topology[0]
+    # Avaliar pesos em paralelo
+    evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology, rng=rng)
 
-        try:
-            best_topology = halloffame_topology[0]
-        except IndexError:  # Primeira geração
-            best_topology = topology_pop[0]
-        # Avaliar pesos em paralelo
-        evaluate_with_topology = partial(toolbox_weights.evaluate, best_topology)
-        fitnesses = list(toolbox_weights.map(evaluate_with_topology, weights_pop))
-        
+    completed = False
+    for _ in range(micro_gens):
+        for i in range(5):
+            try:
+                fitnesses = toolbox_weights.map(evaluate_with_topology, weights_pop)
+                completed = True
+                break
+            except BrokenProcessPool:
+                print("Erro no pool, reinicializando o ProcessPoolExecutor...")
+
+                pool.shutdown(wait=True)  # Encerra o pool atual
+                # Cria um novo pool e atualiza a referência nos workers do toolbox
+                pool = ProcessPoolExecutor(max_workers=NUM_PROCESSES, initializer=init_worker)
+                toolbox_topology.register("map", pool.map)
+                toolbox_weights.register("map", pool.map)
+
+        if not completed:
+            raise RuntimeError("Falha ao avaliar em paralelo após várias tentativas.")
+                
         # Atribuir fitness
         for weights, fit in zip(weights_pop, fitnesses):
             weights.fitness.values = fit
@@ -324,10 +368,30 @@ for gen in range(num_generations):
 
     print("MELHOR INDIVÍDUO:")
     print("Fitness:", halloffame_weights[0].fitness.values)
+    evaluate(halloffame_topology[0], halloffame_weights[0], print_info=True, rng=rng)
     print("-"*128)
 
-df_topology = pd.DataFrame(logbook_topology)
-df_topology.to_csv("topologia.csv", index=False)
+    best_individual = halloffame_topology[0] + halloffame_weights[0]
 
-df_weights = pd.DataFrame(logbook_weights)
-df_weights.to_csv("pesos.csv", index=False)
+    new_data = {
+        "index": [gen],
+        "individual": [best_individual]
+    }
+
+    new_df = pd.DataFrame(new_data)
+    df = pd.concat([df, new_df])
+    df.to_csv("best_individual.csv", index=False)
+
+    df_topology = pd.DataFrame(logbook_topology)
+    df_topology.to_csv("topologia.csv", index=False)
+
+    df_weights = pd.DataFrame(logbook_weights)
+    df_weights.to_csv("pesos.csv", index=False)
+
+    cp = dict(topology_pop=topology_pop, weights_pop=weights_pop, generation=gen, 
+              halloffame_topology=halloffame_topology, halloffame_weights=halloffame_weights, 
+              logbook_topology=logbook_topology, logbook_weights=logbook_weights, rndstate=random.getstate(),
+              rng_obj=RNG)
+
+    with open("checkpoint.pkl", "wb") as cp_file:
+        pickle.dump(cp, cp_file)
