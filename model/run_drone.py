@@ -5,9 +5,11 @@ import random
 from keras import layers
 import keras
 import pandas as pd
+import os
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
 
-env = gym.make("GPS-Distance-v0", rng=random.Random(42), gui=True)
+env = gym.make("GPS-Distance-v0", rng=np.pi, gui=True)
 action_space = env.action_space.shape[1]
 observation_space = 14
 
@@ -18,12 +20,12 @@ def build_model():
     # Leitura do melhor indivíduo
     df = pd.read_csv("best_individual.csv")
     # best_individual = df.iloc[49]["individual"]
-    best_individual = df.tail(1)["individual"]
-    best_individual = best_individual.replace("[", "").replace("]", "").split(", ")
+    best_individual = df.tail(1)["individual"].to_list()[0]
+    best_individual = best_individual[1:-1].split(", ")
 
-    topology = best_individual[-11:]
+    topology = best_individual[:11]
     topology = [int(n) for n in topology]
-    weights_vector = best_individual[:-11]
+    weights_vector = best_individual[11:]
     weights_vector = np.array([float(n) for n in weights_vector])
 
     # Criação da rede
@@ -53,10 +55,9 @@ def build_model():
     model.set_weights(new_weights)
     return model
 
-def run_env(model):
-    obs, info = env.reset(seed=42)
+def run_env(model:keras.Model):
+    obs, info = env.reset()
     done = False
-    total_reward = 0
     while not done:
         obs = np.concatenate((
             obs[0].flatten(), 
@@ -65,7 +66,6 @@ def run_env(model):
         obs = obs.reshape(1, -1)  # Garante (1, 14)
         action = model.predict(obs, verbose=0)
         obs, reward, done, truncated, _ = env.step(action)
-        total_reward += reward
         if done or truncated:
             break
     return reward,

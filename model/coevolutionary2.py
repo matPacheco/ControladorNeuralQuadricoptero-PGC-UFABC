@@ -17,13 +17,21 @@ import random
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from functools import partial
+from functools import partial, reduce
 from argparse import ArgumentParser
 
 
+parser = ArgumentParser()
+parser.add_argument("-p", "--population", default=500, type=int)
+parser.add_argument("-g", "--generations", default=100, type=int)
+parser.add_argument("-e", "--elitism", default=0.1, type=float)
+parser.add_argument("-m", "--microgens", default=3, type=int)
+parser.add_argument("-c", "--checkpoint", action="store_true")
+parser.add_argument("-w", "--workers", default=multiprocessing.cpu_count()//2, type=int)
+args = parser.parse_args()
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
-NUM_PROCESSES = multiprocessing.cpu_count()
-NUM_PROCESSES = 4
+NUM_PROCESSES = args.workers
 print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
@@ -39,6 +47,8 @@ max_neurons = 20  # Número máximo de neurônios em uma camada oculta
 
 min_layers = 1
 max_layers = 10
+
+mutation_choice = reduce(lambda r, e: 2*r + e, [[-k, k] for k in range(1, 5)], [])
 
 def init_worker():
     tf.keras.backend.clear_session()
@@ -86,7 +96,7 @@ def vector_to_model_weights(model, weight_vector):
 
 def mutate_topology(individual, mutation_rate=0.3):
     if np.random.rand() < mutation_rate:  # 10% de chance de mutação na quantidade de camadas
-        choice = int(np.random.choice([-1, 1]))
+        choice = int(np.random.choice(mutation_choice))
         individual[0] = int(np.clip(individual[0] + choice, min_layers, max_layers))
 
     num_layers = individual[0]
@@ -104,7 +114,6 @@ def evaluate(topology, weights, print_info=False, rng=0.0):
     vector_to_model_weights(model, weights_vector)
     
     env = gym.make("GPS-Distance-v0", rng=rng)
-    total_reward = 0
     obs, _ = env.reset()
     done = False
     printed = True
@@ -120,7 +129,6 @@ def evaluate(topology, weights, print_info=False, rng=0.0):
             print("Target Position:")
             print(info["target position"])
             printed= True
-        total_reward += reward
         if done or truncated:
             break
     if print_info:
@@ -191,14 +199,6 @@ def set_evolution(checkpoint=False):
         logbook_weights.header = ["gen", "média", "melhor", "pior"]
 
     return topology_pop, weights_pop, start_gen, halloffame_topology, halloffame_weights, logbook_topology, logbook_weights
-
-parser = ArgumentParser()
-parser.add_argument("-p", "--population", default=500, type=int)
-parser.add_argument("-g", "--generations", default=100, type=int)
-parser.add_argument("-e", "--elitism", default=0.1, type=float)
-parser.add_argument("-m", "--microgens", default=3, type=int)
-parser.add_argument("-c", "--checkpoint", default=False, type=bool)
-args = parser.parse_args()
 
 # Configuração do DEAP
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
