@@ -59,8 +59,9 @@ def eval_genome(genome, config):
         if done or truncated:
             break
 
-    genome.fitness = reward
     env.close()
+
+    return reward
 
 
 def run(config_file):
@@ -95,7 +96,7 @@ def run(config_file):
     visualize.plot_species(stats, view=True)
 
     p = neat.Checkpointer.restore_checkpoint('neat-checkpoint-4')
-    p.run(eval_genomes, 10)
+    p.run(parallel_evaluator.evaluate, 10)
 
 
 if __name__ == '__main__':
