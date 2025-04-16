@@ -1,9 +1,13 @@
 import random
 import os
+import pickle
+import multiprocessing
+from argparse import ArgumentParser
+
+import visualize
 
 import neat
 from neat.genome import DefaultGenome
-import visualize
 
 import numpy as np
 
@@ -13,6 +17,10 @@ import gymnasium as gym
 
 RNG = random.Random(42)
 
+parser = ArgumentParser()
+parser.add_argument("-c", "--checkpoint", type=str, default=False)
+parser.add_argument("-w", "--workers", default=multiprocessing.cpu_count()//2, type=int)
+args = parser.parse_args()
 
 class DroneGenome(DefaultGenome):
     def __init__(self, key):
@@ -64,39 +72,40 @@ def eval_genome(genome, config):
     return reward
 
 
-def run(config_file):
+def run(config_file, checkpoint_path=False):
     # Load configuration.
     config = neat.Config(DroneGenome, neat.DefaultReproduction,
-                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                         config_file)
+                        neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                        config_file)
+    if checkpoint_path:
+        population = neat.Checkpointer.restore_checkpoint(checkpoint_path)
+    else:
+        # Create the population, which is the top-level object for a NEAT run.
+        population = neat.Population(config)
 
-    # Create the population, which is the top-level object for a NEAT run.
-    population = neat.Population(config)
+    checkpoint_dir = 'checkpoints'
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Add a stdout reporter to show progress in the terminal.
     population.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     population.add_reporter(stats)
-    population.add_reporter(neat.Checkpointer(5))
+    population.add_reporter(
+        neat.Checkpointer(5, filename_prefix=os.path.join(checkpoint_dir, 'neat-checkpoint-')))
 
-    parallel_evaluator = neat.ParallelEvaluator(4, eval_genome)
+    parallel_evaluator = neat.ParallelEvaluator(args.workers, eval_genome)
 
     # Run for up to 300 generations.
     winner = population.run(parallel_evaluator.evaluate, 300)
 
     # Display the winning genome.
     print('\nBest genome:\n{!s}'.format(winner))
+    pickle.dump(winner, open('checkpoints/winner.pkl', 'wb'))
+
+    with open('checkpoints/neat-stats.pkl', 'wb') as f:
+        pickle.dump(stats, f)
 
     # TODO: Visualize the winning genome.
-
-    node_names = {-1: 'A', -2: 'B', 0: 'A XOR B'}
-    visualize.draw_net(config, winner, True, node_names=node_names)
-    visualize.draw_net(config, winner, True, node_names=node_names, prune_unused=True)
-    visualize.plot_stats(stats, ylog=False, view=True)
-    visualize.plot_species(stats, view=True)
-
-    p = neat.Checkpointer.restore_checkpoint('neat-checkpoint-4')
-    p.run(parallel_evaluator.evaluate, 10)
 
 
 if __name__ == '__main__':
@@ -105,4 +114,4 @@ if __name__ == '__main__':
     # current working directory.
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config')
-    run(config_path)
+    run(config_path, checkpoint_path=args.checkpoint)
