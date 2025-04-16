@@ -8,6 +8,7 @@ import visualize
 
 import neat
 from neat.genome import DefaultGenome
+from neat.reporting import BaseReporter
 
 import numpy as np
 
@@ -71,6 +72,24 @@ def eval_genome(genome, config):
 
     return reward
 
+class PeriodicStatsSaver(BaseReporter):
+    """Classe para salvar um arquivo de estatísticas a cada 5 gerações"""
+    def __init__(self, stats_obj, interval=5, filename='checkpoints/stats.pkl'):
+        self.stats = stats_obj
+        self.interval = interval
+        self.filename = filename
+        self.current_generation = 0  # Adicionamos um contador interno
+
+        
+    def post_evaluate(self, config, population, species, best_genome):
+        if self.current_generation % self.interval == 0:
+            with open(self.filename, 'wb') as f:
+                pickle.dump(self.stats, f)
+
+    def start_generation(self, generation):
+        """Atualiza a geração atual"""
+        self.current_generation = generation
+
 
 def run(config_file, checkpoint_path=False):
     # Load configuration.
@@ -88,8 +107,12 @@ def run(config_file, checkpoint_path=False):
 
     # Add a stdout reporter to show progress in the terminal.
     population.add_reporter(neat.StdOutReporter(True))
+
     stats = neat.StatisticsReporter()
     population.add_reporter(stats)
+    stats_saver = PeriodicStatsSaver(stats, interval=5)
+    population.add_reporter(stats_saver)
+
     population.add_reporter(
         neat.Checkpointer(5, filename_prefix=os.path.join(checkpoint_dir, 'neat-checkpoint-')))
 
