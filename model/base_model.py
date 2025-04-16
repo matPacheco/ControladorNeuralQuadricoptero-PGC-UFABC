@@ -14,15 +14,23 @@ import os
 import random
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+from argparse import ArgumentParser
 
+
+parser = ArgumentParser()
+parser.add_argument("-p", "--population", default=500, type=int)
+parser.add_argument("-g", "--generations", default=100, type=int)
+parser.add_argument("-c", "--checkpoint", action="store_true")
+parser.add_argument("-w", "--workers", default=multiprocessing.cpu_count()//2, type=int)
+args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Desativa a GPU
-NUM_PROCESSES = multiprocessing.cpu_count()
-NUM_PROCESSES = 6
+NUM_PROCESSES = args.workers
 print("Número de processos:", NUM_PROCESSES)
+
 # Ambiente do Gym
-rng = random.Random(42)
-env = gym.make("GPS-Distance-v0", rng=rng)
+RNG = random.Random(42)
+env = gym.make("GPS-Distance-v0", rng=RNG)
 observation_space = 14
 action_space = env.action_space.shape[1]
 print("Action Space:", action_space)
@@ -213,7 +221,7 @@ final_pop, logbook = algorithms.eaSimple(
 )
 
 df = pd.DataFrame(logbook)
-df.to_csv("logbook.csv")
+df.to_csv("primeiro_algoritmo.csv")
 
 # Melhor solução encontrada
 best_individual = hall_of_fame[0]
