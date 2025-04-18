@@ -19,7 +19,8 @@ import gymnasium as gym
 RNG = random.Random(42)
 
 parser = ArgumentParser()
-parser.add_argument("-c", "--checkpoint", type=str, default=False)
+parser.add_argument("-c", "--checkpoint", default="", type=str)
+parser.add_argument("-g", "--generations", default=300, type=int)
 parser.add_argument("-w", "--workers", default=multiprocessing.cpu_count()//2, type=int)
 args = parser.parse_args()
 
@@ -50,7 +51,7 @@ class DroneGenome(DefaultGenome):
                 node.activation = 'tanh'
 
 def eval_genome(genome, config):
-    env = gym.make("GPS-Distance-v0", rng=RNG)
+    env = gym.make("GPS-Distance-v0", rng=np.pi)
 
     obs, _ = env.reset()
     done = False
@@ -62,11 +63,19 @@ def eval_genome(genome, config):
             obs[0].flatten(), 
             obs[1].flatten(), 
             obs[2].flatten()), axis=0)
-        # obs = obs.reshape(1, -1)  # Garante (1, 14)
         action = np.array(net.activate(obs.tolist())).reshape(1, 4)
         obs, reward, done, truncated, info = env.step(action)
         if done or truncated:
             break
+    if reward >= 50:
+        for _ in range(15):
+            obs = np.concatenate((
+                obs[0].flatten(), 
+                obs[1].flatten(), 
+                obs[2].flatten()), axis=0)
+            action = np.array(net.activate(obs.tolist())).reshape(1, 4)
+            obs, reward, done, truncated, info = env.step(action)
+
 
     env.close()
 
@@ -91,7 +100,7 @@ class PeriodicStatsSaver(BaseReporter):
         self.current_generation = generation
 
 
-def run(config_file, checkpoint_path=False):
+def run(config_file, checkpoint_path=""):
     # Load configuration.
     config = neat.Config(DroneGenome, neat.DefaultReproduction,
                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
@@ -119,7 +128,7 @@ def run(config_file, checkpoint_path=False):
     parallel_evaluator = neat.ParallelEvaluator(args.workers, eval_genome)
 
     # Run for up to 300 generations.
-    winner = population.run(parallel_evaluator.evaluate, 300)
+    winner = population.run(parallel_evaluator.evaluate, args.generations)
 
     # Display the winning genome.
     print('\nBest genome:\n{!s}'.format(winner))
