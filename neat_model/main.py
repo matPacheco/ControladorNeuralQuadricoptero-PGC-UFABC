@@ -83,15 +83,16 @@ def eval_genome(genome, config):
 
 class PeriodicStatsSaver(BaseReporter):
     """Classe para salvar um arquivo de estatísticas a cada 5 gerações"""
-    def __init__(self, stats_obj, interval=5, filename='checkpoints/stats.pkl'):
+    def __init__(self, stats_obj, last_generation, interval=5, filename='checkpoints/stats.pkl'):
         self.stats = stats_obj
         self.interval = interval
         self.filename = filename
-        self.current_generation = 0  # Adicionamos um contador interno
+        self.current_generation = 0,
+        self.last_generation = last_generation
 
         
     def post_evaluate(self, config, population, species, best_genome):
-        if self.current_generation % self.interval == 0:
+        if self.current_generation % self.interval == 0 or self.current_generation == self.last_generation:
             with open(self.filename, 'wb') as f:
                 pickle.dump(self.stats, f)
 
@@ -119,7 +120,7 @@ def run(config_file, checkpoint_path=""):
 
     stats = neat.StatisticsReporter()
     population.add_reporter(stats)
-    stats_saver = PeriodicStatsSaver(stats, interval=5)
+    stats_saver = PeriodicStatsSaver(stats, last_generation=args.generation, interval=5)
     population.add_reporter(stats_saver)
 
     population.add_reporter(
