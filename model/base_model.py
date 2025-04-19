@@ -16,6 +16,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from argparse import ArgumentParser
 
+import pickle
 
 parser = ArgumentParser()
 parser.add_argument("-p", "--population", default=500, type=int)
@@ -207,7 +208,7 @@ mstats.register("min", lambda values: np.round(np.min(values), 1))
 mstats.register("max", lambda values: np.round(np.max(values), 1))
 
 logbook = tools.Logbook()
-logbook.header = ["gen", "fitness", "layers"]  # Cabeçalho para MultiStatistics
+logbook.header = ["gen", "nevals", "fitness", "num_layers", "num_neurons_per_layer"]  # Cabeçalho para MultiStatistics
 logbook.chapters["fitness"].header = ["média", "melhor", "pior"]
 logbook.chapters["layers"].header = ["média_camadas"]
 
@@ -227,8 +228,21 @@ final_pop, logbook = algorithms.eaSimple(
     verbose=True
 )
 
-df = pd.DataFrame(logbook)
-df.to_csv("primeiro_algoritmo.csv")
+data = {
+    "gen":    logbook.select("gen"),
+    "nevals": logbook.select("nevals")
+}
+
+headers = ["avg", "std", "min", "max"]
+for stat in headers:
+    data[f"fitness_{stat}"] = logbook.chapters["fitness"].select(stat)
+for stat in headers:
+    data[f"num_layers_{stat}"] = logbook.chapters["num_layers"].select(stat)
+for stat in headers:
+    data[f"neurons_{stat}"] = logbook.chapters["num_neurons_per_layer"].select(stat)
+
+df = pd.DataFrame(data)
+df.to_csv("primeiro_algoritmo.csv", index=False)
 
 # Melhor solução encontrada
 best_individual = hall_of_fame[0]

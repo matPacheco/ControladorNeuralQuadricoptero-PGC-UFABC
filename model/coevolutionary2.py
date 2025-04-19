@@ -382,7 +382,18 @@ for gen in range(start_gen, num_generations):
     df = pd.concat([df, new_df])
     df.to_csv("best_individual.csv", index=False)
 
-    df_topology = pd.DataFrame(logbook_topology)
+    headers = ["média", "maior", "menor", "std"]
+
+    data = {
+        "gen":    logbook_topology.select("gen"),
+        "nevals": logbook_topology.select("nevals")
+    }
+    for stat in headers:
+        data[f"fitness_{stat}"] = logbook_topology.chapters["fitness"].select(stat)
+        data[f"num_layers_{stat}"] = logbook_topology.chapters["num_layers"].select(stat)
+        data[f"neurons_{stat}"] = logbook_topology.chapters["num_neurons_per_layer"].select(stat)
+
+    df_topology = pd.DataFrame(data)
     df_topology.to_csv("topologia.csv", index=False)
 
     df_weights = pd.DataFrame(logbook_weights)
