@@ -120,7 +120,7 @@ def run(config_file, checkpoint_path=""):
 
     stats = neat.StatisticsReporter()
     population.add_reporter(stats)
-    stats_saver = PeriodicStatsSaver(stats, last_generation=args.generation, interval=5)
+    stats_saver = PeriodicStatsSaver(stats, last_generation=args.generations, interval=5)
     population.add_reporter(stats_saver)
 
     population.add_reporter(

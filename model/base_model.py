@@ -30,7 +30,7 @@ print("Número de processos:", NUM_PROCESSES)
 
 # Ambiente do Gym
 RNG = random.Random(42)
-env = gym.make("GPS-Distance-v0", rng=RNG)
+env = gym.make("GPS-Distance-v0", rng=np.pi)
 observation_space = 14
 action_space = env.action_space.shape[1]
 print("Action Space:", action_space)
@@ -121,7 +121,6 @@ def evaluate(individual):
     model = build_model(individual)
     vector_to_model_weights(model, weight_vector)
 
-    total_reward = 0
     obs, _ = env.reset()
     done = False
     while not done:
@@ -132,9 +131,17 @@ def evaluate(individual):
         obs = obs.reshape(1, -1)  # Garante (1, 14)
         action = model.predict(obs, verbose=0)
         obs, reward, done, truncated, _ = env.step(action)
-        total_reward += reward
         if done or truncated:
             break
+    if reward >= 50:
+        for _ in range(15):
+            obs = np.concatenate((
+                obs[0].flatten(), 
+                obs[1].flatten(), 
+                obs[2].flatten()), axis=0)
+            obs = obs.reshape(1, -1)  # Garante (1, 14)
+            action = model.predict(obs, verbose=0)
+            obs, reward, done, truncated, _ = env.step(action)
 
     return reward,
 
