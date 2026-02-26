@@ -2,6 +2,7 @@ import random
 import os
 import pickle
 import multiprocessing
+import math
 from argparse import ArgumentParser
 
 import visualize
@@ -22,7 +23,19 @@ parser = ArgumentParser()
 parser.add_argument("-c", "--checkpoint", default="", type=str)
 parser.add_argument("-g", "--generations", default=300, type=int)
 parser.add_argument("-w", "--workers", default=multiprocessing.cpu_count()//2, type=int)
+parser.add_argument("-a", "--activation_function", default="tanh")
 args = parser.parse_args()
+
+
+def softsign(x):
+    """Função para gerar uma softsign para a camada de saída"""
+    return x / (1 + math.fabs(x))
+
+def custom_tanh(x):
+    """Função para gerar uma tangente hiperbólica com temperatura para tentarmos adiar a saturação da rede"""
+    alfa = 3
+    return math.tanh(x/alfa)
+
 
 class DroneGenome(DefaultGenome):
     def __init__(self, key):
@@ -37,7 +50,7 @@ class DroneGenome(DefaultGenome):
         for node_id in self.nodes:
             node = self.nodes[node_id]
             if node_id in output_ids:  # Verifica se o ID é de saída
-                node.activation = 'tanh'
+                node.activation = args.activation_function
 
     def mutate(self, config):
         """Personaliza a mutação para ignorar a função de ativação dos nós de saída."""
@@ -48,7 +61,7 @@ class DroneGenome(DefaultGenome):
         for node_id in self.nodes:
             node = self.nodes[node_id]
             if node_id in output_ids:  # Verifica se o ID é de saída
-                node.activation = 'tanh'
+                node.activation = args.activation_function
 
 def eval_genome(genome, config):
     env = gym.make("GPS-Distance-v0", rng=np.pi)
@@ -87,7 +100,7 @@ class PeriodicStatsSaver(BaseReporter):
         self.stats = stats_obj
         self.interval = interval
         self.filename = filename
-        self.current_generation = 0,
+        self.current_generation = 0
         self.last_generation = last_generation
 
         
@@ -106,8 +119,11 @@ def run(config_file, checkpoint_path=""):
     config = neat.Config(DroneGenome, neat.DefaultReproduction,
                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
                         config_file)
+    config.genome_config.add_activation('softsign', softsign)
+    config.genome_config.add_activation('custom_tanh', custom_tanh)
     if checkpoint_path:
         population = neat.Checkpointer.restore_checkpoint(checkpoint_path)
+        population.config = config
     else:
         # Create the population, which is the top-level object for a NEAT run.
         population = neat.Population(config)
